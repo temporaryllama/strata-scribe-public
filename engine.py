@@ -11,19 +11,22 @@ from json_repair import repair_json
 import streamlit as st
 
 # --- THE SMART SWITCH ---
+# 1. If on the Cloud, use the Vault.
+# 2. If on Laptop, use the keys below.
 if "OPENAI_API_KEY" in st.secrets:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 else:
-    # PASTE YOUR KEYS HERE FOR LOCAL USE
-    OPENAI_API_KEY = ""
-    GEMINI_API_KEY = ""
+    # --- PASTE YOUR REAL KEYS HERE FOR LOCAL TESTING ---
+    OPENAI_API_KEY = "sk-..." 
+    GEMINI_API_KEY = "AIza..."
 
 # --- SETUP ---
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 client = OpenAI(api_key=OPENAI_API_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 
+# Smart PDF Import
 try:
     from weasyprint import HTML
     PDF_AVAILABLE = True
@@ -43,6 +46,7 @@ class StrataEngine:
             raise ValueError(f"Could not load audio: {e}")
 
         audio = audio.normalize()
+        # Chunking: 10 mins with 30s overlap
         chunk_length_ms = 10 * 60 * 1000
         overlap_ms = 30 * 1000
         chunks = []
@@ -67,31 +71,33 @@ class StrataEngine:
         
         return full_transcript
 
-    def analyze_text(self, transcript):
+    def analyze_text(self, transcript, strata_plan="SP [Unknown]"):
         today_str = datetime.now().strftime("%d %B %Y")
         
         prompt = f"""
         ROLE: Professional Strata Managing Agent (NSW/VIC jurisdiction).
-        CONTEXT: Today's date is {today_str}.
-        TASK: Convert transcript to strict legal minutes.
+        CONTEXT: Today's date is {today_str}. Strata Plan: {strata_plan}.
+        TASK: Convert transcript to strict, legally compliant minutes following Agency Standards.
         
         INPUT TRANSCRIPT:
         {{transcript}}
 
-        LEGAL GUIDELINES:
-        1. Passive Voice Only.
-        2. No Defamation.
-        3. Action Items must be imperative.
-        4. DATES: If unknown, use {today_str}.
-        
+        LEGAL GUIDELINES (STRICT):
+        1. QUORUM: Check attendees. If valid, state: "A quorum was declared pursuant to Schedule 1 of the Strata Schemes Management Act."
+        2. MOTIONS: Use the phrasing "That the Owners Corporation RESOLVED to..." for decisions.
+        3. STATUS: Append "(CARRIED)" or "(DEFEATED)" to the end of every Item Title.
+        4. VOICE: Strict Passive Voice. (e.g. "It was noted that..." NOT "Dave said...").
+        5. DATES/TIMES: If not explicitly spoken, use "Not Recorded". Do not guess.
+
         FORMATTING RULES:
-        - Use "Item 1:", "Item 2:" structure.
-        - EMAIL DRAFT: Generate the Subject and Body ONLY. Do NOT include a sign-off (e.g., "Sincerely", "Regards") or a signature block. End with the final sentence of the body.
+        - Header Style: "MINUTES OF STRATA COMMITTEE MEETING"
+        - Item numbering: "Item 1:", "Item 2:" (Do not use "3.1" or "Motion 1").
+        - EMAIL DRAFT: Subject and Body ONLY. Do not include a sign-off or signature.
 
         OUTPUT FORMAT (JSON ONLY):
         {{{{
-            "meeting_metadata": {{{{ "date": "DD/MM/YYYY", "attendees": "..." }}}},
-            "minutes_html_body": "<h3>Item 1: Title</h3><p>Resolution text...</p>...",
+            "meeting_metadata": {{{{ "date": "...", "time_commenced": "...", "attendees": "...", "strata_plan": "{strata_plan}" }}}},
+            "minutes_html_body": "<p><em>A quorum was declared...</em></p><h3>Item 1: [Title] (CARRIED)</h3><p>That the Owners Corporation RESOLVED to...</p>...",
             "action_list": [ {{{{ "task": "...", "assignee": "...", "priority": "..." }}}} ],
             "email_draft": "Subject: ... Body: ..."
         }}}}
@@ -104,24 +110,42 @@ class StrataEngine:
 
     def clean_markdown(self, text):
         if not text: return ""
-        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-        text = re.sub(r'#{1,6}\s?', '', text)
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text) # Remove bold
+        text = re.sub(r'#{1,6}\s?', '', text)         # Remove headers
         return text
 
     def generate_pdf(self, data, filename):
         if not PDF_AVAILABLE: return None
+        
+        # PRO LEVEL STYLING (Mimicking the Agency PDF)
         html = f"""
         <html><head><style>
-            body {{ font-family: Helvetica, sans-serif; padding: 40px; line-height: 1.6; }}
-            h1 {{ border-bottom: 2px solid #333; padding-bottom: 10px; }}
-            h3 {{ margin-top: 20px; color: #2c3e50; border-bottom: 1px solid #eee; }}
-            .meta {{ color: #666; font-size: 0.9em; margin-bottom: 30px; }}
+            body {{ font-family: 'Helvetica', sans-serif; padding: 40px; line-height: 1.5; font-size: 11pt; }}
+            .header {{ text-align: center; margin-bottom: 30px; }}
+            h1 {{ font-size: 16pt; margin-bottom: 5px; text-transform: uppercase; }}
+            h2 {{ font-size: 12pt; margin-top: 0; font-weight: normal; color: #555; }}
+            .meta-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+            .meta-table td {{ padding: 5px; border-bottom: 1px solid #eee; }}
+            .label {{ font-weight: bold; width: 150px; }}
+            h3 {{ margin-top: 20px; font-size: 12pt; border-bottom: 1px solid #000; padding-bottom: 3px; }}
+            p {{ margin-bottom: 10px; text-align: justify; }}
         </style></head><body>
-            <h1>MINUTES OF MEETING</h1>
-            <div class="meta">
-                <p><strong>Date:</strong> {data.get('meeting_metadata', {}).get('date', 'Not Recorded')}</p>
+            
+            <div class="header">
+                <h1>Minutes of Meeting</h1>
+                <h2>Strata Plan {data.get('meeting_metadata', {}).get('strata_plan', 'N/A')}</h2>
             </div>
+
+            <table class="meta-table">
+                <tr><td class="label">Date:</td><td>{data.get('meeting_metadata', {}).get('date', 'Not Recorded')}</td></tr>
+                <tr><td class="label">Commenced:</td><td>{data.get('meeting_metadata', {}).get('time_commenced', 'Not Recorded')}</td></tr>
+                <tr><td class="label">Attendees:</td><td>{data.get('meeting_metadata', {}).get('attendees', 'Not Recorded')}</td></tr>
+            </table>
+
             {data.get('minutes_html_body', '<p>No minutes generated.</p>')}
+            
+            <br><br>
+            <p style="text-align: center; font-size: 9pt; color: #888;">Generated by StrataScribe</p>
         </body></html>
         """
         HTML(string=html).write_pdf(filename)

@@ -34,17 +34,21 @@ if check_password():
     # --- SIDEBAR SETTINGS ---
     with st.sidebar:
         st.header("⚙️ Settings")
+        # NEW: Strata Plan Number
+        strata_plan_no = st.text_input("Strata Plan No.", "SP [Insert Number]")
+        
         user_name = st.text_input("Your Name", "The Committee")
         user_title = st.text_input("Your Title", "Strata Managing Agent")
+        
         st.divider()
         st.info("💡 **Tip:** Pass a by-law allowing recordings to ensure you are always covered legally.")
-        st.caption("StrataScribe v1.7 (Legal Edition)")
+        st.caption("StrataScribe v1.8") # Removed "Legal Edition"
 
     # --- MAIN APP ---
     st.title("🏢 StrataScribe")
     st.write("### Meeting Dashboard")
 
-    # --- LEGAL WARNING (NEW) ---
+    # --- LEGAL WARNING ---
     with st.expander("⚠️ Important Legal Notice regarding Recordings"):
         st.warning("""
         **NSW Surveillance Devices Act 2007:**
@@ -70,7 +74,7 @@ if check_password():
 
         st.divider()
 
-        # --- THE CONSENT GATE (NEW) ---
+        # --- THE CONSENT GATE ---
         consent = st.checkbox("✅ I confirm that I have obtained consent from all attendees to record this meeting.")
 
         if st.button("Start Processing 🚀", type="primary", disabled=not consent):
@@ -82,13 +86,14 @@ if check_password():
                     text = engine.process_audio_robust(temp_filename)
                     
                     status.write("⚖️ Drafting minutes...")
-                    data = engine.analyze_text(text)
+                    # PASS THE STRATA PLAN NUMBER TO THE ENGINE
+                    data = engine.analyze_text(text, strata_plan=strata_plan_no)
                     
                     status.write("📄 Finalizing documents...")
                     pdf_path = engine.generate_pdf(data, "Minutes.pdf")
                     csv_path = engine.generate_csv(data, "Actions.csv")
                     
-                    # EMAIL CLEANUP
+                    # EMAIL CLEANUP + SIGNATURE
                     email_raw = data.get('email_draft', "")
                     if isinstance(email_raw, dict):
                          subject = email_raw.get('subject', 'Meeting Update')
@@ -99,7 +104,8 @@ if check_password():
                     
                     email_text_clean = engine.clean_markdown(email_text)
                     
-                    # SIGNATURE INJECTION
+                    # SIGNATURE INJECTION (No Double-Up)
+                    # We check if the user accidentally typed "Sincerely" in the prompt output (rare now)
                     signature_block = f"\n\nSincerely,\n\n{user_name}\n{user_title}"
                     if "Sincerely" not in email_text_clean:
                         email_text_clean += signature_block
