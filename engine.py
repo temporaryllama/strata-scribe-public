@@ -10,14 +10,12 @@ import google.generativeai as genai
 from json_repair import repair_json
 import streamlit as st
 
-# --- THE SMART SWITCH ---
-# 1. If on the Cloud, use the Vault.
-# 2. If on Laptop, use the keys below.
+# --- SMART SWITCH ---
 if "OPENAI_API_KEY" in st.secrets:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 else:
-    # --- PASTE YOUR REAL KEYS HERE FOR LOCAL TESTING ---
+    # LOCAL KEYS
     OPENAI_API_KEY = "sk-..." 
     GEMINI_API_KEY = "AIza..."
 
@@ -26,7 +24,6 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 client = OpenAI(api_key=OPENAI_API_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Smart PDF Import
 try:
     from weasyprint import HTML
     PDF_AVAILABLE = True
@@ -36,6 +33,7 @@ except (ImportError, OSError):
 class StrataEngine:
     def __init__(self):
         self.model_id = 'gemini-2.5-flash'
+        # NO CREATIVITY: Deterministic Output
         self.model = genai.GenerativeModel(self.model_id)
 
     def process_audio_robust(self, file_path):
@@ -46,7 +44,6 @@ class StrataEngine:
             raise ValueError(f"Could not load audio: {e}")
 
         audio = audio.normalize()
-        # Chunking: 10 mins with 30s overlap
         chunk_length_ms = 10 * 60 * 1000
         overlap_ms = 30 * 1000
         chunks = []
@@ -85,39 +82,48 @@ class StrataEngine:
         LEGAL GUIDELINES (STRICT):
         1. QUORUM: Check attendees. If valid, state: "A quorum was declared pursuant to Schedule 1 of the Strata Schemes Management Act."
         2. MOTIONS: Use the phrasing "That the Owners Corporation RESOLVED to..." for decisions.
-        3. STATUS: Append "(CARRIED)" or "(DEFEATED)" to the end of every Item Title.
-        4. VOICE: Strict Passive Voice. (e.g. "It was noted that..." NOT "Dave said...").
-        5. DATES/TIMES: If not explicitly spoken, use "Not Recorded". Do not guess.
+        3. STATUS: 
+           - If the group agrees to proceed, mark as "(CARRIED)". 
+           - Only mark as "(DEFEATED)" if there is an explicit rejection or "No" vote. 
+           - If discussed but not decided, mark as "(NOTED)".
+        4. VOICE: Strict Passive Voice.
+        5. DATES: If unknown, use {today_str}.
+        6. EXCLUSIONS: Do NOT record general banter, discussions about food/catering, weather, or personal grievances unrelated to motions.
 
         FORMATTING RULES:
-        - Header Style: "MINUTES OF STRATA COMMITTEE MEETING"
-        - Item numbering: "Item 1:", "Item 2:" (Do not use "3.1" or "Motion 1").
-        - EMAIL DRAFT: Subject and Body ONLY. Do not include a sign-off or signature.
+        - HEADER: "MINUTES OF STRATA COMMITTEE MEETING"
+        - NUMBERING: Use "Item 1:", "Item 2:". Do NOT repeat the Item number in the title text.
+        - EMAIL DRAFT: Subject and Body ONLY. No signature.
 
         OUTPUT FORMAT (JSON ONLY):
         {{{{
             "meeting_metadata": {{{{ "date": "...", "time_commenced": "...", "attendees": "...", "strata_plan": "{strata_plan}" }}}},
-            "minutes_html_body": "<p><em>A quorum was declared...</em></p><h3>Item 1: [Title] (CARRIED)</h3><p>That the Owners Corporation RESOLVED to...</p>...",
+            "minutes_html_body": "<p><em>A quorum was declared...</em></p><h3>Item 1: [Concise Title] (CARRIED)</h3><p>That the Owners Corporation RESOLVED to...</p>...",
             "action_list": [ {{{{ "task": "...", "assignee": "...", "priority": "..." }}}} ],
             "email_draft": "Subject: ... Body: ..."
         }}}}
         """
         try:
-            response = self.model.generate_content(prompt.format(transcript=transcript))
+            # Temperature 0.0 = "The Accountant Mode"
+            generation_config = genai.types.GenerationConfig(temperature=0.0)
+            
+            response = self.model.generate_content(
+                prompt.format(transcript=transcript),
+                generation_config=generation_config
+            )
             return json.loads(repair_json(response.text))
         except Exception:
             return {}
 
     def clean_markdown(self, text):
         if not text: return ""
-        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text) # Remove bold
-        text = re.sub(r'#{1,6}\s?', '', text)         # Remove headers
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+        text = re.sub(r'#{1,6}\s?', '', text)
         return text
 
     def generate_pdf(self, data, filename):
         if not PDF_AVAILABLE: return None
         
-        # PRO LEVEL STYLING (Mimicking the Agency PDF)
         html = f"""
         <html><head><style>
             body {{ font-family: 'Helvetica', sans-serif; padding: 40px; line-height: 1.5; font-size: 11pt; }}
