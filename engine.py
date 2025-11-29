@@ -72,6 +72,7 @@ class StrataEngine:
     def analyze_text(self, transcript, strata_plan="SP [Unknown]"):
         today_str = datetime.now().strftime("%d %B %Y")
         
+        # UPDATED PROMPT: Fixed the grammar to be a standalone sentence
         prompt = f"""
         ROLE: Professional Strata Managing Agent (NSW/VIC jurisdiction).
         CONTEXT: Today's date is {today_str}. Strata Plan: {strata_plan}.
@@ -82,7 +83,7 @@ class StrataEngine:
 
         LEGAL GUIDELINES (STRICT):
         1. QUORUM: Check attendees. If valid, state: "A quorum was declared pursuant to Schedule 1 of the Strata Schemes Management Act."
-        2. MOTIONS: Use the phrasing "That the Owners Corporation RESOLVED to..." for decisions.
+        2. MOTIONS: Start resolution sentences with "It was RESOLVED that the Owners Corporation..." or "The Committee RESOLVED to..." (Ensure full, grammatically correct sentences).
         3. STATUS: 
            - If the group agrees to proceed, mark as "(CARRIED)". 
            - Only mark as "(DEFEATED)" if there is an explicit rejection or "No" vote. 
@@ -90,7 +91,7 @@ class StrataEngine:
         4. VOICE: Strict Passive Voice.
         5. DATES: If unknown, use {today_str}.
         6. EXCLUSIONS: Do NOT record general banter, discussions about food/catering, weather, or personal grievances unrelated to motions.
-        7. CONTENT DEPTH: Do NOT be overly brief. For each item, provide 1-2 sentences summarizing the issue/context *before* stating the resolution.
+        7. CONTENT DEPTH: Provide 1-2 sentences summarizing the issue/context *before* stating the resolution.
 
         FORMATTING RULES:
         - HEADER: "MINUTES OF STRATA COMMITTEE MEETING"
@@ -100,18 +101,16 @@ class StrataEngine:
         OUTPUT FORMAT (JSON ONLY):
         {{{{
             "meeting_metadata": {{{{ "date": "...", "time_commenced": "...", "attendees": "...", "strata_plan": "{strata_plan}" }}}},
-            "minutes_html_body": "<p><em>A quorum was declared...</em></p><h3>Item 1: [Concise Title] (CARRIED)</h3><p>[Summary of issue]. That the Owners Corporation RESOLVED to...</p>...",
+            "minutes_html_body": "<p><em>A quorum was declared...</em></p><h3>Item 1: [Concise Title] (CARRIED)</h3><p>[Summary of issue]. It was RESOLVED that the Owners Corporation...</p>...",
             "action_list": [ {{{{ "task": "...", "assignee": "...", "priority": "..." }}}} ],
             "email_draft": "Subject: ... Body: ..."
         }}}}
         """
         try:
             # Temperature 0.2 = "Professional but Descriptive"
-            generation_config = genai.types.GenerationConfig(temperature=0.2)
-            
             response = self.model.generate_content(
                 prompt.format(transcript=transcript),
-                generation_config=generation_config
+                generation_config={"temperature": 0.2}
             )
             return json.loads(repair_json(response.text))
         except Exception:
